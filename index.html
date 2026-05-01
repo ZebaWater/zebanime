@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZebAnime</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="lobby-page">
+
+  <div class="noise-overlay"></div>
+  <div class="bg-grid"></div>
+
+  <header class="site-header">
+    <h1 class="logo-en">ZEB<span class="logo-accent">ANIME</span></h1>
+  </header>
+
+  <main class="lobby-main">
+
+    <div class="card lobby-card">
+      <div class="card-corner tl"></div>
+      <div class="card-corner tr"></div>
+      <div class="card-corner bl"></div>
+      <div class="card-corner br"></div>
+
+      <div class="name-row">
+        <input
+          type="text"
+          id="name-input"
+          class="name-input"
+          maxlength="20"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="btn-reroll" id="reroll-btn" title="Generate random name">↺</button>
+      </div>
+
+      <div class="lobby-actions">
+        <button class="btn btn-primary" id="create-room-btn">
+          <span class="btn-text">CREATE ROOM</span>
+        </button>
+
+        <div class="divider"><span>OR</span></div>
+
+        <div class="join-group">
+          <input
+            type="text"
+            id="room-code-input"
+            class="room-input"
+            placeholder="ROOM CODE"
+            maxlength="6"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="btn btn-secondary" id="join-room-btn">JOIN</button>
+        </div>
+      </div>
+
+      <div class="status-msg" id="lobby-status"></div>
+    </div>
+
+    <div class="rules-block">
+      <h2 class="rules-title">// HOW IT WORKS</h2>
+      <ol class="rules-list">
+        <li>Two players join the same room</li>
+        <li>A random anime is selected — hidden from both</li>
+        <li>Clues are revealed each round, from vague to specific</li>
+        <li>Timer shrinks every round — pressure mounts</li>
+        <li>First to guess the correct title wins</li>
+        <li>Wrong guess? Both see the next clue</li>
+        <li>All clues out? <strong>Sudden Death</strong> — 30 seconds or it's a draw</li>
+      </ol>
+    </div>
+
+  </main>
+
+  <div class="waiting-overlay hidden" id="waiting-overlay">
+    <div class="waiting-card">
+      <div class="waiting-spinner"></div>
+      <p class="waiting-title">ROOM CREATED</p>
+      <p class="waiting-code-label">Share this code</p>
+      <div class="waiting-code" id="waiting-code">——</div>
+      <p class="waiting-sub">Waiting for opponent...</p>
+      <button class="btn btn-ghost" id="cancel-room-btn">Cancel</button>
+    </div>
+  </div>
+
+  <script type="module" src="firebase-init.js"></script>
+  <script type="module" src="lobby.js"></script>
+</body>
+</html>

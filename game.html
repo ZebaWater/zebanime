@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AnimeDuel — Duel in Progress</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Sawarabi+Mincho&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="game-page">
+
+  <div class="noise-overlay"></div>
+  <div class="bg-grid"></div>
+
+  <!-- Top HUD -->
+  <div class="game-hud">
+    <div class="hud-player hud-left" id="hud-me">
+      <span class="hud-name" id="hud-my-name">YOU</span>
+      <span class="hud-score" id="hud-my-score">—</span>
+    </div>
+
+    <div class="hud-center">
+      <div class="round-label">ROUND <span id="round-num">1</span></div>
+      <div class="timer-ring-wrap">
+        <svg class="timer-ring" viewBox="0 0 80 80">
+          <circle class="ring-bg" cx="40" cy="40" r="34" />
+          <circle class="ring-fill" id="ring-fill" cx="40" cy="40" r="34" />
+        </svg>
+        <span class="timer-text" id="timer-text">45</span>
+      </div>
+      <div class="sudden-death-badge hidden" id="sd-badge">⚡ SUDDEN DEATH</div>
+    </div>
+
+    <div class="hud-player hud-right" id="hud-opp">
+      <span class="hud-score" id="hud-opp-score">—</span>
+      <span class="hud-name" id="hud-opp-name">OPPONENT</span>
+    </div>
+  </div>
+
+  <!-- Main game area -->
+  <main class="game-main">
+
+    <!-- Clue board -->
+    <div class="clue-board" id="clue-board">
+      <div class="clue-board-header">
+        <span class="clue-board-title">CLUES REVEALED</span>
+        <span class="clue-count" id="clue-count">0 / 10</span>
+      </div>
+      <div class="clues-list" id="clues-list">
+        <!-- clue items injected here -->
+      </div>
+    </div>
+
+    <!-- Guess panel -->
+    <div class="guess-panel">
+      <div class="guess-feedback" id="guess-feedback"></div>
+
+      <div class="guess-input-wrap">
+        <input
+          type="text"
+          id="guess-input"
+          class="guess-input"
+          placeholder="Type the anime title..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <button class="btn btn-guess" id="guess-btn">GUESS</button>
+      </div>
+
+      <div class="guess-history" id="guess-history">
+        <!-- past guesses shown here -->
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Result overlay -->
+  <div class="result-overlay hidden" id="result-overlay">
+    <div class="result-card">
+      <div class="result-icon" id="result-icon">🏆</div>
+      <div class="result-title" id="result-title">YOU WIN</div>
+      <div class="result-answer">
+        The anime was:
+        <span class="result-anime-title" id="result-anime-title">—</span>
+      </div>
+      <div class="result-image-wrap">
+        <img class="result-anime-img hidden" id="result-anime-img" alt="anime cover" />
+      </div>
+      <div class="result-actions">
+        <button class="btn btn-primary" id="play-again-btn">PLAY AGAIN</button>
+        <button class="btn btn-ghost" id="back-lobby-btn">LOBBY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Disconnect overlay -->
+  <div class="result-overlay hidden" id="disconnect-overlay">
+    <div class="result-card">
+      <div class="result-icon">📡</div>
+      <div class="result-title">OPPONENT LEFT</div>
+      <div class="result-answer">The duel has ended.</div>
+      <div class="result-actions">
+        <button class="btn btn-primary" id="dc-lobby-btn">LOBBY</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="firebase-init.js"></script>
+  <script type="module" src="game.js"></script>
+</body>
+</html>
