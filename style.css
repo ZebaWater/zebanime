@@ -34,7 +34,7 @@ html, body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
-  font-size: 15px;
+  font-size: 17px;
   line-height: 1.6;
   overflow-x: hidden;
 }
@@ -411,7 +411,7 @@ html, body {
 
 .hud-name {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: 0.85rem;
   color: var(--text-dim);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -419,7 +419,7 @@ html, body {
 
 .hud-score {
   font-family: var(--font-display);
-  font-size: 1.8rem;
+  font-size: 2rem;
   color: var(--text);
   line-height: 1;
 }
@@ -434,7 +434,7 @@ html, body {
 
 .round-label {
   font-family: var(--font-mono);
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   color: var(--text-dim);
   letter-spacing: 0.15em;
 }
@@ -519,14 +519,14 @@ html, body {
 
 .clue-board-title {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.78rem;
   color: var(--text-dim);
   letter-spacing: 0.12em;
 }
 
 .clue-count {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.78rem;
   color: var(--accent);
 }
 
@@ -572,7 +572,7 @@ html, body {
 
 .clue-label {
   font-family: var(--font-mono);
-  font-size: 0.58rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
   letter-spacing: 0.1em;
   margin-bottom: 4px;
@@ -580,7 +580,7 @@ html, body {
 }
 
 .clue-value {
-  font-size: 0.88rem;
+  font-size: 1rem;
   color: var(--text);
   line-height: 1.4;
 }
@@ -616,8 +616,8 @@ html, body {
 
 .guess-feedback {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
-  min-height: 20px;
+  font-size: 0.85rem;
+  min-height: 22px;
   letter-spacing: 0.04em;
   transition: color 0.2s;
 }
@@ -636,7 +636,7 @@ html, body {
   border: 1px solid var(--border);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 0.9rem;
+  font-size: 1rem;
   padding: 14px 16px;
   outline: none;
   transition: border-color 0.15s;
@@ -644,7 +644,7 @@ html, body {
 }
 
 .guess-input:focus { border-color: var(--accent); }
-.guess-input::placeholder { color: var(--text-muted); font-size: 0.75rem; }
+.guess-input::placeholder { color: var(--text-muted); font-size: 0.85rem; }
 .guess-input:disabled { opacity: 0.4; }
 
 .btn-guess {
@@ -680,7 +680,7 @@ html, body {
   align-items: center;
   gap: 10px;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.85rem;
   padding: 8px 12px;
   background: var(--bg3);
   border-left: 2px solid var(--border);
@@ -693,7 +693,7 @@ html, body {
 .guess-entry-who {
   color: var(--text-muted);
   flex-shrink: 0;
-  font-size: 0.6rem;
+  font-size: 0.72rem;
 }
 
 .guess-entry-text { color: var(--text); flex: 1; }
@@ -805,3 +805,40 @@ html, body {
 }
 
 .shake { animation: shake 0.4s ease; }
+
+/* ── Autocomplete ── */
+.ac-box {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-top: none;
+  z-index: 100;
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.ac-item {
+  padding: 10px 16px;
+  font-family: var(--font-mono);
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-bottom: 1px solid var(--bg3);
+  transition: background 0.1s, color 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ac-item:last-child { border-bottom: none; }
+
+.ac-item:hover,
+.ac-item.active {
+  background: var(--bg3);
+  color: var(--text);
+}

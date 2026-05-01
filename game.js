@@ -48,6 +48,7 @@ const dcLobbyBtn    = document.getElementById("dc-lobby-btn");
 let roomData          = null;
 let timerInterval     = null;
 let lastRevealedCount = 0;
+let lastTimerEndsAt   = null;   // track to avoid restarting timer unnecessarily
 let amHost            = false;
 let guessLocked       = false;
 let gameOver          = false;
@@ -105,9 +106,14 @@ function handleRoomUpdate(snap) {
     guessInput.placeholder = "Sudden death — type the title...";
   }
 
+  // Only restart the countdown when timerEndsAt actually changes
+  // This prevents the guest's timer from resetting on unrelated snapshots
   if (data.timerEndsAt) {
-    const endsAt = data.timerEndsAt.toMillis?.() ?? data.timerEndsAt;
-    startCountdown(endsAt, data.round, data.suddenDeath);
+    const endsAtMs = data.timerEndsAt.toMillis?.() ?? data.timerEndsAt;
+    if (endsAtMs !== lastTimerEndsAt) {
+      lastTimerEndsAt = endsAtMs;
+      startCountdown(endsAtMs, data.round, data.suddenDeath);
+    }
   }
 
   guessLocked = false;
@@ -129,7 +135,7 @@ function handleGuessUpdate(snap) {
 // ── Round advancement ──
 async function startNextRound(roundNum) {
   const isSuddenDeath = roundNum > TOTAL_CLUES;
-  const timerSecs     = isSuddenDeath ? SD_TIMER : (ROUND_TIMERS[roundNum - 1] ?? 20);
+  const timerSecs     = isSuddenDeath ? SD_TIMER : (ROUND_TIMERS[roundNum - 1] ?? 15);
   const newClueCount  = Math.min(roundNum, TOTAL_CLUES);
   const endsAt        = Date.now() + timerSecs * 1000;
 
@@ -145,7 +151,7 @@ async function startNextRound(roundNum) {
 // ── Timer ──
 function startCountdown(endsAtMs, round, suddenDeath) {
   clearTimerInterval();
-  const totalSecs = suddenDeath ? SD_TIMER : (ROUND_TIMERS[round - 1] ?? 20);
+  const totalSecs = suddenDeath ? SD_TIMER : (ROUND_TIMERS[round - 1] ?? 15);
 
   timerInterval = setInterval(async () => {
     const remaining = Math.max(0, Math.ceil((endsAtMs - Date.now()) / 1000));
@@ -155,8 +161,8 @@ function startCountdown(endsAtMs, round, suddenDeath) {
     timerTextEl.textContent = remaining;
 
     timerWrap.classList.remove("timer-low", "timer-critical");
-    if (remaining <= 5)       timerWrap.classList.add("timer-critical");
-    else if (remaining <= 12) timerWrap.classList.add("timer-low");
+    if (remaining <= 5)      timerWrap.classList.add("timer-critical");
+    else if (remaining <= 10) timerWrap.classList.add("timer-low");
 
     if (remaining <= 0) {
       clearTimerInterval();
@@ -165,7 +171,6 @@ function startCountdown(endsAtMs, round, suddenDeath) {
       guessLocked = true;
 
       if (suddenDeath) {
-        // Sudden death expired — draw
         await updateDoc(roomRef, { draw: true, status: "finished" });
         scheduleRoomCleanup();
       } else {
@@ -189,6 +194,7 @@ async function submitGuess() {
   if (!guess || guessLocked || gameOver) return;
 
   guessInput.value = "";
+  closeSuggestions();
   guessLocked = true;
   guessInput.disabled = true;
   guessBtn.disabled = true;
@@ -232,6 +238,95 @@ function buildAnimeProxy() {
     titles:         roomData.animeTitles        || []
   };
 }
+
+// ── Autocomplete ──
+// We fetch a small list of titles from Jikan search as the user types
+let acTimeout = null;
+let acCache   = {};
+
+guessInput.addEventListener("input", () => {
+  const q = guessInput.value.trim();
+  closeSuggestions();
+  if (q.length < 2) return;
+
+  clearTimeout(acTimeout);
+  acTimeout = setTimeout(() => fetchSuggestions(q), 350);
+});
+
+guessInput.addEventListener("keydown", (e) => {
+  const items = document.querySelectorAll(".ac-item");
+  const active = document.querySelector(".ac-item.active");
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (!active) items[0]?.classList.add("active");
+    else {
+      active.classList.remove("active");
+      (active.nextElementSibling || items[0]).classList.add("active");
+    }
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!active) items[items.length - 1]?.classList.add("active");
+    else {
+      active.classList.remove("active");
+      (active.previousElementSibling || items[items.length - 1]).classList.add("active");
+    }
+  } else if (e.key === "Escape") {
+    closeSuggestions();
+  }
+  // Enter is handled by submitGuess listener above;
+  // if an ac item is active, fill it first
+  if (e.key === "Enter" && active) {
+    e.stopImmediatePropagation();
+    guessInput.value = active.dataset.title;
+    closeSuggestions();
+    submitGuess();
+  }
+});
+
+async function fetchSuggestions(q) {
+  if (acCache[q]) { showSuggestions(acCache[q]); return; }
+  try {
+    const res  = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&limit=6&sfw`);
+    const json = await res.json();
+    const titles = (json.data || []).map(a => a.title_english || a.title).filter(Boolean);
+    acCache[q] = titles;
+    showSuggestions(titles);
+  } catch {}
+}
+
+function showSuggestions(titles) {
+  closeSuggestions();
+  if (!titles.length) return;
+
+  const box = document.createElement("div");
+  box.id = "ac-box";
+  box.className = "ac-box";
+
+  titles.forEach(title => {
+    const item = document.createElement("div");
+    item.className = "ac-item";
+    item.textContent = title;
+    item.dataset.title = title;
+    item.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      guessInput.value = title;
+      closeSuggestions();
+      guessInput.focus();
+    });
+    box.appendChild(item);
+  });
+
+  guessInput.parentElement.style.position = "relative";
+  guessInput.parentElement.appendChild(box);
+}
+
+function closeSuggestions() {
+  document.getElementById("ac-box")?.remove();
+}
+
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".guess-input-wrap")) closeSuggestions();
+});
 
 // ── UI ──
 function renderRevealedClues(count) {
@@ -307,13 +402,49 @@ function showDisconnect() {
   dcOverlay.classList.remove("hidden");
 }
 
-// ── Nav ──
-playAgainBtn.addEventListener("click", () => { window.location.href = "index.html"; });
+// ── Play Again — same two players, new room ──
+playAgainBtn.addEventListener("click", async () => {
+  // Store the opponent's info so the new room can be pre-filled for them
+  const oppId   = amHost ? roomData.guestId   : roomData.hostId;
+  const oppName = amHost ? roomData.guestName : roomData.hostName;
+
+  // Write a "rematch" signal to current room so opponent gets redirected too
+  try {
+    const newCode = generateRoomCode();
+    await updateDoc(roomRef, { rematchCode: newCode });
+    // Navigate host to lobby with rematch param — lobby.js will auto-create
+    window.location.href = `index.html?rematch=${newCode}&opp=${encodeURIComponent(oppId)}`;
+  } catch {
+    window.location.href = "index.html";
+  }
+});
+
+// Listen for rematch from opponent
+onSnapshot(roomRef, (snap) => {
+  if (!snap.exists()) return;
+  const d = snap.data();
+  if (d.rematchCode && !gameOver) return; // ignore if we triggered it
+  if (d.rematchCode && gameOver && d.winner !== player.uid && !d.draw) {
+    // Opponent (winner) triggered rematch — follow them
+    window.location.href = `index.html?rematch=${d.rematchCode}`;
+  }
+  if (d.rematchCode && gameOver && (d.draw || d.winner === player.uid)) {
+    // We triggered it already, handled above
+  }
+});
+
 backLobbyBtn.addEventListener("click", () => { window.location.href = "index.html"; });
 dcLobbyBtn.addEventListener("click",   () => { window.location.href = "index.html"; });
 
 async function scheduleRoomCleanup() {
   try { await updateDoc(roomRef, { deleteAt: Date.now() + 10 * 60 * 1000 }); } catch {}
+}
+
+function generateRoomCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
 }
 
 window.addEventListener("beforeunload", () => {
