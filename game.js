@@ -4,13 +4,16 @@ import { db } from "./firebase-init.js";
 import { getPlayer } from "./player.js";
 import { checkGuess } from "./jikan.js";
 import { TOTAL_CLUES } from "./clues.js";
+import { pickRandomAnimeId } from "./anime-ids.js";
+import { fetchEnrichedAnime } from "./jikan.js";
+import { buildClueValues } from "./clues.js";
 import {
   doc, getDoc, updateDoc, addDoc, collection,
   onSnapshot, serverTimestamp, Timestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const ROUND_TIMERS = [30, 28, 25, 22, 20, 18, 16, 15, 15, 15];
-const SD_TIMER = 30;
+const ROUND_DURATION = 15;   // flat 15 s every round
+const SD_TIMER       = 15;   // sudden death same pace
 const RING_CIRCUMFERENCE = 213.6;
 
 const player   = getPlayer();
@@ -45,13 +48,16 @@ const dcOverlay     = document.getElementById("disconnect-overlay");
 const dcLobbyBtn    = document.getElementById("dc-lobby-btn");
 
 // ── State ──
-let roomData          = null;
-let timerInterval     = null;
-let lastRevealedCount = 0;
-let lastTimerEndsAt   = null;   // track to avoid restarting timer unnecessarily
-let amHost            = false;
-let guessLocked       = false;
-let gameOver          = false;
+let roomData             = null;
+let timerInterval        = null;
+let lastRevealedCount    = 0;
+let lastTimerEndsAt      = null;
+let amHost               = false;
+let guessLocked          = false;
+let gameOver             = false;
+let iWantRematch         = false;   // did I press Play Again?
+let seenRematchVersion   = 0;       // tracks rematchVersion to detect resets
+let rematchResetInFlight = false;   // prevents host from firing reset twice
 
 hudMyName.textContent = player.name.toUpperCase();
 
@@ -65,6 +71,8 @@ async function init() {
 
   const oppName = amHost ? roomData.guestName : roomData.hostName;
   hudOppName.textContent = (oppName || "OPPONENT").toUpperCase();
+
+  seenRematchVersion = roomData.rematchVersion ?? 0;
 
   renderRevealedClues(roomData.revealedClueCount || 0);
 
@@ -84,6 +92,25 @@ function handleRoomUpdate(snap) {
   roomData = data;
 
   if (data.status === "disconnected" && !gameOver) { showDisconnect(); return; }
+
+  // ── Rematch: version bump means host finished resetting → reload cleanly ──
+  const incomingVersion = data.rematchVersion ?? 0;
+  if (incomingVersion > seenRematchVersion) {
+    rematchResetInFlight = true;  // suppress beforeunload disconnect on both sides
+    window.location.reload();
+    return;
+  }
+
+  // ── Rematch: both players ready → host triggers the reset ──
+  if (gameOver && data.rematchReady && !rematchResetInFlight) {
+    const { hostReady, guestReady } = data.rematchReady;
+    if (hostReady && guestReady && amHost) {
+      rematchResetInFlight = true;
+      resetRoomForRematch();  // async; will bump rematchVersion which triggers reload above
+      return;
+    }
+    updateRematchButtonState(data.rematchReady);
+  }
 
   if ((data.winner || data.draw) && !gameOver) {
     gameOver = true;
@@ -106,13 +133,12 @@ function handleRoomUpdate(snap) {
     guessInput.placeholder = "Sudden death — type the title...";
   }
 
-  // Only restart the countdown when timerEndsAt actually changes
-  // This prevents the guest's timer from resetting on unrelated snapshots
+  // Only restart countdown when timerEndsAt actually changes
   if (data.timerEndsAt) {
     const endsAtMs = data.timerEndsAt.toMillis?.() ?? data.timerEndsAt;
     if (endsAtMs !== lastTimerEndsAt) {
       lastTimerEndsAt = endsAtMs;
-      startCountdown(endsAtMs, data.round, data.suddenDeath);
+      startCountdown(endsAtMs, data.suddenDeath);
     }
   }
 
@@ -123,9 +149,12 @@ function handleRoomUpdate(snap) {
 
 // ── Guess update handler ──
 function handleGuessUpdate(snap) {
+  const currentVersion = seenRematchVersion;
   snap.docChanges().forEach(change => {
     if (change.type === "added") {
-      const g    = change.doc.data();
+      const g = change.doc.data();
+      // Ignore guesses from previous games in this room
+      if ((g.rematchVersion ?? 0) !== currentVersion) return;
       const isMe = g.uid === player.uid;
       addGuessToHistory(g.guess, isMe);
     }
@@ -135,7 +164,7 @@ function handleGuessUpdate(snap) {
 // ── Round advancement ──
 async function startNextRound(roundNum) {
   const isSuddenDeath = roundNum > TOTAL_CLUES;
-  const timerSecs     = isSuddenDeath ? SD_TIMER : (ROUND_TIMERS[roundNum - 1] ?? 15);
+  const timerSecs     = isSuddenDeath ? SD_TIMER : ROUND_DURATION;
   const newClueCount  = Math.min(roundNum, TOTAL_CLUES);
   const endsAt        = Date.now() + timerSecs * 1000;
 
@@ -149,9 +178,11 @@ async function startNextRound(roundNum) {
 }
 
 // ── Timer ──
-function startCountdown(endsAtMs, round, suddenDeath) {
+// totalSecs is always deterministic now (flat 15s), so both players compute the
+// same denominator and the ring fill is accurate for everyone.
+function startCountdown(endsAtMs, suddenDeath) {
   clearTimerInterval();
-  const totalSecs = suddenDeath ? SD_TIMER : (ROUND_TIMERS[round - 1] ?? 15);
+  const totalSecs = suddenDeath ? SD_TIMER : ROUND_DURATION;
 
   timerInterval = setInterval(async () => {
     const remaining = Math.max(0, Math.ceil((endsAtMs - Date.now()) / 1000));
@@ -161,7 +192,7 @@ function startCountdown(endsAtMs, round, suddenDeath) {
     timerTextEl.textContent = remaining;
 
     timerWrap.classList.remove("timer-low", "timer-critical");
-    if (remaining <= 5)      timerWrap.classList.add("timer-critical");
+    if (remaining <= 5)       timerWrap.classList.add("timer-critical");
     else if (remaining <= 10) timerWrap.classList.add("timer-low");
 
     if (remaining <= 0) {
@@ -170,11 +201,15 @@ function startCountdown(endsAtMs, round, suddenDeath) {
 
       guessLocked = true;
 
+      const snap = await getDoc(roomRef);
+      const d    = snap.data();
+      if (d?.winner || d?.draw) return; // someone guessed just in time
+
       if (suddenDeath) {
         await updateDoc(roomRef, { draw: true, status: "finished" });
         scheduleRoomCleanup();
       } else {
-        const nextRound = (roomData?.round ?? round) + 1;
+        const nextRound = (d?.round ?? roomData?.round) + 1;
         await startNextRound(nextRound);
       }
     }
@@ -202,12 +237,13 @@ async function submitGuess() {
   const correct = checkGuess(guess, buildAnimeProxy());
 
   await addDoc(collection(db, "rooms", roomCode, "guesses"), {
-    uid:       player.uid,
-    name:      player.name,
+    uid:            player.uid,
+    name:           player.name,
     guess,
-    round:     roomData.round,
+    round:          roomData.round,
     correct,
-    timestamp: serverTimestamp()
+    rematchVersion: roomData.rematchVersion ?? 0,
+    timestamp:      serverTimestamp()
   });
 
   if (correct) {
@@ -240,7 +276,6 @@ function buildAnimeProxy() {
 }
 
 // ── Autocomplete ──
-// We fetch a small list of titles from Jikan search as the user types
 let acTimeout = null;
 let acCache   = {};
 
@@ -248,33 +283,24 @@ guessInput.addEventListener("input", () => {
   const q = guessInput.value.trim();
   closeSuggestions();
   if (q.length < 2) return;
-
   clearTimeout(acTimeout);
   acTimeout = setTimeout(() => fetchSuggestions(q), 350);
 });
 
 guessInput.addEventListener("keydown", (e) => {
-  const items = document.querySelectorAll(".ac-item");
+  const items  = document.querySelectorAll(".ac-item");
   const active = document.querySelector(".ac-item.active");
   if (e.key === "ArrowDown") {
     e.preventDefault();
     if (!active) items[0]?.classList.add("active");
-    else {
-      active.classList.remove("active");
-      (active.nextElementSibling || items[0]).classList.add("active");
-    }
+    else { active.classList.remove("active"); (active.nextElementSibling || items[0]).classList.add("active"); }
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
     if (!active) items[items.length - 1]?.classList.add("active");
-    else {
-      active.classList.remove("active");
-      (active.previousElementSibling || items[items.length - 1]).classList.add("active");
-    }
+    else { active.classList.remove("active"); (active.previousElementSibling || items[items.length - 1]).classList.add("active"); }
   } else if (e.key === "Escape") {
     closeSuggestions();
   }
-  // Enter is handled by submitGuess listener above;
-  // if an ac item is active, fill it first
   if (e.key === "Enter" && active) {
     e.stopImmediatePropagation();
     guessInput.value = active.dataset.title;
@@ -286,10 +312,10 @@ guessInput.addEventListener("keydown", (e) => {
 async function fetchSuggestions(q) {
   if (acCache[q]) { showSuggestions(acCache[q]); return; }
   try {
-    const res  = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&limit=6&sfw`);
-    const json = await res.json();
+    const res    = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&limit=6&sfw`);
+    const json   = await res.json();
     const titles = (json.data || []).map(a => a.title_english || a.title).filter(Boolean);
-    acCache[q] = titles;
+    acCache[q]   = titles;
     showSuggestions(titles);
   } catch {}
 }
@@ -297,11 +323,9 @@ async function fetchSuggestions(q) {
 function showSuggestions(titles) {
   closeSuggestions();
   if (!titles.length) return;
-
   const box = document.createElement("div");
   box.id = "ac-box";
   box.className = "ac-box";
-
   titles.forEach(title => {
     const item = document.createElement("div");
     item.className = "ac-item";
@@ -315,14 +339,11 @@ function showSuggestions(titles) {
     });
     box.appendChild(item);
   });
-
   guessInput.parentElement.style.position = "relative";
   guessInput.parentElement.appendChild(box);
 }
 
-function closeSuggestions() {
-  document.getElementById("ac-box")?.remove();
-}
+function closeSuggestions() { document.getElementById("ac-box")?.remove(); }
 
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".guess-input-wrap")) closeSuggestions();
@@ -402,36 +423,76 @@ function showDisconnect() {
   dcOverlay.classList.remove("hidden");
 }
 
-// ── Play Again — same two players, new room ──
+// ── Play Again — in-place rematch, no page navigation ──
+//
+// Both players press "Play Again". Each write their ready flag to
+// rematchReady.{hostReady|guestReady}. When both are set, the host
+// fetches a new anime, resets the room doc, and bumps rematchVersion.
+// handleRoomUpdate detects the version bump and reloads the page for
+// both players — giving them a clean slate in the same room.
+
 playAgainBtn.addEventListener("click", async () => {
-  // Store the opponent's info so the new room can be pre-filled for them
-  const oppId   = amHost ? roomData.guestId   : roomData.hostId;
-  const oppName = amHost ? roomData.guestName : roomData.hostName;
+  if (iWantRematch) return;      // don't double-fire
+  iWantRematch = true;
 
-  // Write a "rematch" signal to current room so opponent gets redirected too
+  playAgainBtn.textContent = "WAITING FOR OPPONENT…";
+  playAgainBtn.disabled    = true;
+
+  const field = amHost ? "rematchReady.hostReady" : "rematchReady.guestReady";
   try {
-    const newCode = generateRoomCode();
-    await updateDoc(roomRef, { rematchCode: newCode });
-    // Navigate host to lobby with rematch param — lobby.js will auto-create
-    window.location.href = `index.html?rematch=${newCode}&opp=${encodeURIComponent(oppId)}`;
+    await updateDoc(roomRef, { [field]: true });
   } catch {
-    window.location.href = "index.html";
+    iWantRematch             = false;
+    playAgainBtn.textContent = "PLAY AGAIN";
+    playAgainBtn.disabled    = false;
   }
 });
 
-// Listen for rematch from opponent
-onSnapshot(roomRef, (snap) => {
-  if (!snap.exists()) return;
-  const d = snap.data();
-  if (d.rematchCode && !gameOver) return; // ignore if we triggered it
-  if (d.rematchCode && gameOver && d.winner !== player.uid && !d.draw) {
-    // Opponent (winner) triggered rematch — follow them
-    window.location.href = `index.html?rematch=${d.rematchCode}`;
+function updateRematchButtonState(rematchReady) {
+  if (!iWantRematch) return;   // only update if we already pressed
+  const oppReady = amHost ? rematchReady.guestReady : rematchReady.hostReady;
+  if (oppReady) {
+    playAgainBtn.textContent = "LOADING…";
   }
-  if (d.rematchCode && gameOver && (d.draw || d.winner === player.uid)) {
-    // We triggered it already, handled above
+}
+
+async function resetRoomForRematch() {
+  try {
+    playAgainBtn.textContent = "LOADING…";
+
+    const animeId    = pickRandomAnimeId();
+    const animeData  = await fetchEnrichedAnime(animeId);
+    const clueValues = buildClueValues(animeData);
+
+    const currentVersion = roomData.rematchVersion ?? 0;
+
+    await updateDoc(roomRef, {
+      animeId:            animeId,
+      animeTitle:         animeData.title,
+      animeTitleEnglish:  animeData.title_english  || "",
+      animeTitleJapanese: animeData.title_japanese || "",
+      animeTitles:        animeData.titles         || [],
+      animeImage:         animeData.images?.jpg?.image_url || null,
+      clueValues:         clueValues,
+      round:              0,
+      timerEndsAt:        null,
+      revealedClueCount:  0,
+      suddenDeath:        false,
+      winner:             null,
+      winnerName:         null,
+      draw:               false,
+      status:             "in_progress",
+      rematchReady:       { hostReady: false, guestReady: false },
+      rematchVersion:     currentVersion + 1,
+      deleteAt:           Date.now() + 30 * 60 * 1000
+    });
+    // The version bump triggers window.location.reload() in handleRoomUpdate for both players
+  } catch (err) {
+    console.error("Rematch reset failed:", err);
+    playAgainBtn.textContent = "PLAY AGAIN";
+    iWantRematch = false;
   }
-});
+}
 
 backLobbyBtn.addEventListener("click", () => { window.location.href = "index.html"; });
 dcLobbyBtn.addEventListener("click",   () => { window.location.href = "index.html"; });
@@ -440,15 +501,9 @@ async function scheduleRoomCleanup() {
   try { await updateDoc(roomRef, { deleteAt: Date.now() + 10 * 60 * 1000 }); } catch {}
 }
 
-function generateRoomCode() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
-}
-
 window.addEventListener("beforeunload", () => {
-  if (!gameOver && roomData) {
+  // Don't signal disconnect during a rematch reload or after game is over
+  if (!gameOver && !rematchResetInFlight && roomData) {
     updateDoc(roomRef, { status: "disconnected" }).catch(() => {});
   }
 });

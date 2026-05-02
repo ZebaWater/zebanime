@@ -40,102 +40,6 @@ rerollBtn.addEventListener("click", () => {
   saveName(name);
 });
 
-// ── Check for rematch redirect ──
-const urlParams = new URLSearchParams(window.location.search);
-const rematchCode = urlParams.get("rematch");
-
-if (rematchCode) {
-  // Guest follows host into rematch room — just join it
-  const isHost = urlParams.get("opp") === null;
-  if (!isHost) {
-    // We're the guest being redirected — auto-join the rematch room
-    setStatus("Rematch starting…");
-    autoJoinRematch(rematchCode);
-  } else {
-    // We're the host — auto-create the rematch room with this code
-    autoCreateRematch(rematchCode);
-  }
-}
-
-async function autoJoinRematch(code) {
-  // Poll until the room exists (host may still be creating it)
-  let attempts = 0;
-  const tryJoin = async () => {
-    attempts++;
-    try {
-      const roomRef  = doc(db, "rooms", code);
-      const roomSnap = await getDoc(roomRef);
-      if (roomSnap.exists() && roomSnap.data().status === "waiting") {
-        await updateDoc(roomRef, {
-          guestId:   player.uid,
-          guestName: player.name,
-          status:    "in_progress"
-        });
-        window.location.href = `game.html?room=${code}`;
-      } else if (attempts < 10) {
-        setTimeout(tryJoin, 800);
-      } else {
-        setStatus("Rematch room not found. Create a new room.");
-      }
-    } catch {
-      if (attempts < 10) setTimeout(tryJoin, 800);
-    }
-  };
-  tryJoin();
-}
-
-async function autoCreateRematch(code) {
-  setStatus("Creating rematch room…");
-  createBtn.disabled = true;
-  try {
-    const animeId    = pickRandomAnimeId();
-    setStatus("Fetching anime data…");
-    const animeData  = await fetchEnrichedAnime(animeId);
-    const clueValues = buildClueValues(animeData);
-
-    const roomRef = doc(db, "rooms", code);
-    await setDoc(roomRef, {
-      status:             "waiting",
-      hostId:             player.uid,
-      hostName:           player.name,
-      guestId:            null,
-      guestName:          null,
-      animeId:            animeId,
-      animeTitle:         animeData.title,
-      animeTitleEnglish:  animeData.title_english  || "",
-      animeTitleJapanese: animeData.title_japanese || "",
-      animeTitles:        animeData.titles         || [],
-      animeImage:         animeData.images?.jpg?.image_url || null,
-      clueValues:         clueValues,
-      round:              0,
-      timerEndsAt:        null,
-      revealedClueCount:  0,
-      suddenDeath:        false,
-      winner:             null,
-      draw:               false,
-      createdAt:          serverTimestamp(),
-      deleteAt:           Date.now() + 30 * 60 * 1000
-    });
-
-    currentRoomCode = code;
-    showWaitingOverlay(code);
-    setStatus("");
-
-    unsubscribeRoom = onSnapshot(roomRef, (snap) => {
-      const data = snap.data();
-      if (!data) return;
-      if (data.guestId) {
-        unsubscribeRoom?.();
-        window.location.href = `game.html?room=${code}`;
-      }
-    });
-  } catch (err) {
-    console.error(err);
-    setStatus("Error creating rematch. Try again.");
-    createBtn.disabled = false;
-  }
-}
-
 // ── CREATE ROOM ──
 createBtn.addEventListener("click", async () => {
   const name = nameInput.value.trim();
@@ -171,7 +75,10 @@ createBtn.addEventListener("click", async () => {
       revealedClueCount:  0,
       suddenDeath:        false,
       winner:             null,
+      winnerName:         null,
       draw:               false,
+      rematchReady:       { hostReady: false, guestReady: false },
+      rematchVersion:     0,
       createdAt:          serverTimestamp(),
       deleteAt:           Date.now() + 30 * 60 * 1000
     });
